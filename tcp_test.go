@@ -1,6 +1,7 @@
-package ch03
+package main
 
 import (
+	"context"
 	"io"
 	"net"
 	"syscall"
@@ -9,7 +10,7 @@ import (
 )
 
 func TestListenerer(t *testing.T) {
-	listener, err := net.Listen("tcp", "128.0.0.1:0")
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -66,9 +67,9 @@ func TestDial(t *testing.T) {
 	<-done
 }
 
-func DialTimeout(network, address string, timeout time.Duration) (net.Conn, error) {
+func /*1*/ DialTimeout(network, address string, timeout time.Duration) (net.Conn, error) {
 	d := net.Dialer {
-		Control: func(network, address string, _ syscall.RawConn) error {
+/*2*/	Control: func(network, address string, _ syscall.RawConn) error {
 			return &net.DNSError{
 				Err: 			"connection timed out",
 				Name: 			address,
@@ -80,4 +81,48 @@ func DialTimeout(network, address string, timeout time.Duration) (net.Conn, erro
 		Timeout: timeout,	
 	}
 	return d.Dial(network, address)
+}
+
+func TestDialTimeout(t *testing.T)  {
+	c, err := DialTimeout("tcp", "10.0.0.1:http",/*3*/ 5*time.Second)
+	if err == nil {
+		c.Close()
+		t.Fatal("connection did not time out")
+	}
+
+	nErr, ok := /*4*/ err.(net.Error)
+	if !ok {
+		t.Fatal(err)
+	}
+	if /*5*/ !nErr.Timeout(){
+		t.Fatal("error is not a timeout")
+	}
+}
+
+func TestDialContext(t *testing.T)  {
+	dl := time.Now().Add(5 * time.Second)
+	ctx, cancel := context.WithDeadline(context.Background(), dl)
+	defer cancel()
+
+	var d net.Dialer 
+	d.Control = func(_, _ string, _ syscall.RawConn) error {
+		time.Sleep(5 * time.Second + time.Millisecond)
+		return nil
+	}
+	conn, err := d.DialContext(ctx, "tcp", "10.0.0.0:80")
+	if err != nil {
+		conn.Close()
+		t.Fatal("connection didnt time out")
+	}
+	nErr, ok := err.(net.Error)
+	if !ok {
+		t.Error(err)
+	} else {
+		if !nErr.Timeout() {
+			t.Errorf("error is not a timeout :%v", err)
+		}
+	}
+	if ctx.Err() != context.DeadlineExceeded {
+		t.Errorf("expected deadline exceeded; actual: %v", ctx.Err())
+	}
 }
